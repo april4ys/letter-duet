@@ -1,0 +1,297 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function room(roomId) {
+      return get(/databases/$(database)/documents/rooms/$(roomId));
+    }
+
+    function roomExists(roomId) {
+      return exists(/databases/$(database)/documents/rooms/$(roomId));
+    }
+
+    function isRoomMember(roomId) {
+      return isSignedIn()
+        && roomExists(roomId)
+        && isRoomVisible(roomId);
+    }
+
+    function isRoomVisible(roomId) {
+      return !room(roomId).data.keys().hasAny(["deleted"])
+        || room(roomId).data.deleted == false;
+    }
+
+    function isGM(roomId) {
+      return isSignedIn()
+        && roomExists(roomId)
+        && isRoomVisible(roomId)
+        && room(roomId).data.gmUid == request.auth.uid;
+    }
+
+    function isRoomActive(roomId) {
+      return isRoomMember(roomId)
+        && room(roomId).data.isArchived == false;
+    }
+
+    function hasOnlyKeys(keys) {
+      return request.resource.data.keys().hasOnly(keys);
+    }
+
+    function isValidRoom() {
+      return hasOnlyKeys(["title", "gmUid", "isArchived", "deleted", "createdAt"])
+        && request.resource.data.title is string
+        && request.resource.data.gmUid is string
+        && request.resource.data.isArchived is bool
+        && request.resource.data.deleted is bool
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function isValidNotice() {
+      return hasOnlyKeys(["content"])
+        && request.resource.data.content is string;
+    }
+
+    function isValidStory() {
+      return hasOnlyKeys(["storyFragments", "fragmentEffectCount", "updatedAt"])
+        && request.resource.data.storyFragments is list
+        && (
+          !request.resource.data.keys().hasAny(["fragmentEffectCount"])
+          || (
+            request.resource.data.fragmentEffectCount is int
+            && request.resource.data.fragmentEffectCount >= 0
+            && request.resource.data.fragmentEffectCount <= 18
+          )
+        )
+        && (
+          !request.resource.data.keys().hasAny(["updatedAt"])
+          || request.resource.data.updatedAt is timestamp
+        );
+    }
+
+    function isValidFragmentEffectStep() {
+      return (
+          !resource.data.keys().hasAny(["fragmentEffectCount"])
+          && request.resource.data.fragmentEffectCount == 1
+        )
+        || (
+          resource.data.keys().hasAny(["fragmentEffectCount"])
+          && (
+            request.resource.data.fragmentEffectCount
+              == resource.data.fragmentEffectCount + 1
+            || request.resource.data.fragmentEffectCount
+              == resource.data.fragmentEffectCount - 1
+          )
+        );
+    }
+
+    function isValidFragment(fragment) {
+      return fragment.keys().hasOnly(["original", "mutated"])
+        && fragment.original is string
+        && fragment.mutated is string;
+    }
+
+    function isValidCharacter() {
+      return hasOnlyKeys(["name", "role", "fragments", "memo", "updatedAt"])
+        && request.resource.data.name is string
+        && request.resource.data.role in ["binder", "shifter"]
+        && request.resource.data.fragments is list
+        && request.resource.data.fragments.size() == 6
+        && isValidFragment(request.resource.data.fragments[0])
+        && isValidFragment(request.resource.data.fragments[1])
+        && isValidFragment(request.resource.data.fragments[2])
+        && isValidFragment(request.resource.data.fragments[3])
+        && isValidFragment(request.resource.data.fragments[4])
+        && isValidFragment(request.resource.data.fragments[5])
+        && request.resource.data.memo is string
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    function isValidPost() {
+      return hasOnlyKeys(["type", "authorRole", "authorUid", "content", "createdAt", "deleted"])
+        && request.resource.data.type in ["post", "system"]
+        && request.resource.data.authorRole in ["player1", "player2", "system"]
+        && request.resource.data.authorUid is string
+        && request.resource.data.content is string
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.deleted is bool;
+    }
+
+    function isPlayerCharacterSystemPost(roomId) {
+      return request.resource.data.type == "system"
+        && request.resource.data.authorRole == "system"
+        && request.resource.data.content.matches("캐릭터 수정:(.|\\n)*")
+        && getAfter(/databases/$(database)/documents/rooms/$(roomId)/characters/player2).data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/rooms/$(roomId)/characters/player2).data
+          .diff(get(/databases/$(database)/documents/rooms/$(roomId)/characters/player2).data)
+          .affectedKeys().hasAny(["name", "role", "fragments"]);
+    }
+
+    function isFragmentEffectSystemPost(roomId) {
+      return request.resource.data.type == "system"
+        && request.resource.data.authorRole == "system"
+        && (
+          request.resource.data.content.matches(
+            "프래그먼트 효과 사용: [0-9]+ / 18\\n판정값 \\+2(\\n이계화 필요)?"
+          )
+          || request.resource.data.content.matches(
+            "프래그먼트 효과 취소: [0-9]+ / 18"
+          )
+        )
+        && getAfter(/databases/$(database)/documents/rooms/$(roomId)/story/main).data.updatedAt
+          == request.time
+        && getAfter(/databases/$(database)/documents/rooms/$(roomId)/story/main).data
+          .diff(get(/databases/$(database)/documents/rooms/$(roomId)/story/main).data)
+          .affectedKeys().hasOnly(["fragmentEffectCount", "updatedAt"]);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /rooms/{roomId} {
+      allow get: if isRoomMember(roomId);
+
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && !roomExists(roomId)
+        && isValidRoom()
+        && request.resource.data.gmUid == request.auth.uid;
+
+      allow update: if isGM(roomId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["isArchived", "deleted"])
+        && request.resource.data.isArchived is bool
+        && request.resource.data.deleted is bool;
+
+      allow delete: if false;
+
+      match /notice/{docId} {
+        allow read: if isRoomMember(roomId);
+
+        allow create, update: if isGM(roomId)
+          && isRoomActive(roomId)
+          && docId == "main"
+          && isValidNotice();
+
+        allow delete: if false;
+      }
+
+      match /story/{docId} {
+        allow read: if isRoomMember(roomId);
+
+        allow create: if isGM(roomId)
+          && isRoomActive(roomId)
+          && docId == "main"
+          && isValidStory();
+
+        allow update: if isRoomActive(roomId)
+          && docId == "main"
+          && isValidStory()
+          && (
+            (
+              isGM(roomId)
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(["storyFragments"])
+            )
+            || (
+              isRoomMember(roomId)
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(["fragmentEffectCount", "updatedAt"])
+              && request.resource.data.updatedAt == request.time
+              && isValidFragmentEffectStep()
+            )
+          );
+
+        allow delete: if false;
+      }
+
+      match /characters/{characterId} {
+        allow read: if isRoomMember(roomId);
+
+        allow create: if isGM(roomId)
+          && isRoomActive(roomId)
+          && characterId in ["player1", "player2"]
+          && isValidCharacter();
+
+        allow update: if isRoomActive(roomId)
+          && isValidCharacter()
+          && (
+            isGM(roomId)
+            ||
+            (
+              isRoomMember(roomId)
+              && !isGM(roomId)
+              && characterId == "player2"
+            )
+          );
+
+        allow delete: if false;
+      }
+
+      match /posts/{postId} {
+        allow read: if isRoomMember(roomId);
+
+        allow create: if isRoomMember(roomId)
+          && isRoomActive(roomId)
+          && isValidPost()
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.deleted == false
+          && (
+            isGM(roomId)
+            ||
+            (
+              request.resource.data.type == "post"
+              && request.resource.data.authorRole == "player2"
+            )
+            ||
+            isPlayerCharacterSystemPost(roomId)
+            ||
+            isFragmentEffectSystemPost(roomId)
+          )
+          && (
+            (
+              request.resource.data.type == "system"
+              && request.resource.data.authorRole == "system"
+            )
+            ||
+            (
+              request.resource.data.type == "post"
+              && request.resource.data.authorRole in ["player1", "player2"]
+            )
+          )
+          && (
+            request.resource.data.type == "post"
+            ||
+            request.resource.data.type == "system"
+          );
+
+        allow update: if isRoomActive(roomId)
+          && isValidPost()
+          && request.resource.data.type == resource.data.type
+          && request.resource.data.authorRole == resource.data.authorRole
+          && request.resource.data.authorUid == resource.data.authorUid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && (
+            isGM(roomId)
+            ||
+            (
+              isRoomMember(roomId)
+              && resource.data.authorUid == request.auth.uid
+              && resource.data.type == "post"
+              && resource.data.deleted == false
+              && request.resource.data.deleted == true
+              && request.resource.data.content == resource.data.content
+            )
+          );
+
+        allow delete: if false;
+      }
+    }
+  }
+}
