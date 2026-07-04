@@ -372,8 +372,8 @@ input:disabled {
 }
 
 .brand-title-button:focus-visible {
-  outline: 3px solid var(--color-accent-border);
-  outline-offset: 5px;
+  outline: none;
+  color: var(--color-accent-text);
 }
 
 .intro {
