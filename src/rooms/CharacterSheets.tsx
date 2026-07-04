@@ -197,7 +197,7 @@ function CharacterSheetEditor({
     <article className="character-sheet">
       <header>
         <div>
-          <span>{character.id}</span>
+          <span>{character.id === "player1" ? "GM" : "Player"}</span>
           <input
             className="character-name-input"
             disabled={!canEdit}
@@ -209,7 +209,11 @@ function CharacterSheetEditor({
           />
         </div>
         <small>
-          {character.id === "player1" ? "GM" : isGM ? "편집 가능" : "내 캐릭터"}
+          {character.id === (isGM ? "player1" : "player2")
+            ? "내 캐릭터"
+            : isGM
+              ? "편집 가능"
+              : ""}
         </small>
       </header>
       <div className="character-role-select" ref={roleMenuRef}>
