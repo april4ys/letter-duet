@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Dices } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { type User } from "firebase/auth";
 import { getFirestoreErrorMessage } from "../lib/firestoreErrors";
@@ -65,6 +65,7 @@ export function PostComposer({
   );
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRolling, setIsRolling] = useState(false);
   const [characterNames, setCharacterNames] = useState<CharacterNames>(
     defaultCharacterNames,
   );
@@ -100,11 +101,6 @@ export function PostComposer({
   }, [authorRole, content, draftKey, postType]);
 
   useEffect(() => {
-    if (!content && postType === "post") {
-      setAuthorRole(getDefaultAuthorRole(canCreateSystemPost));
-      return;
-    }
-
     if (
       !canCreateSystemPost &&
       (postType === "system" || authorRole !== "player2")
@@ -116,6 +112,10 @@ export function PostComposer({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isRolling) {
+      return;
+    }
 
     const nextContent = content.trim();
 
@@ -146,19 +146,57 @@ export function PostComposer({
     }
   }
 
+  async function handleDiceRoll(diceCount: number, sides: number) {
+    if (isRolling || postType === "system") {
+      return;
+    }
+
+    const dice = Array.from({ length: diceCount }, () => rollDie(sides));
+    const notation = `${diceCount}D${sides}`;
+
+    setIsRolling(true);
+    setMessage("");
+
+    try {
+      await createRoomPost(
+        roomId,
+        formatDicePost(notation, dice),
+        currentUser.uid,
+        "post",
+        authorRole,
+      );
+    } catch (error) {
+      setMessage(
+        getFirestoreErrorMessage(error, "주사위 결과를 저장하지 못했습니다."),
+      );
+    } finally {
+      setIsRolling(false);
+    }
+  }
+
   return (
     <form className="post-composer" onSubmit={handleSubmit}>
-      {canCreateSystemPost ? (
-        <PostIdentitySelect
-          characterNames={characterNames}
-          disabled={isSubmitting}
-          value={postType === "system" ? "system" : authorRole}
-          onChange={(identity) => {
-            setPostType(identity === "system" ? "system" : "post");
-            setAuthorRole(identity);
-          }}
+      <div className="post-composer-tools">
+        {canCreateSystemPost ? (
+          <PostIdentitySelect
+            characterNames={characterNames}
+            disabled={isSubmitting || isRolling}
+            value={postType === "system" ? "system" : authorRole}
+            onChange={(identity) => {
+              setPostType(identity === "system" ? "system" : "post");
+              setAuthorRole(identity);
+            }}
+          />
+        ) : (
+          <div className="post-identity-static">
+            {characterNames.player2}
+          </div>
+        )}
+        <ComposerDiceButtons
+          disabled={isSubmitting || isRolling || postType === "system"}
+          onRoll={handleDiceRoll}
         />
-      ) : null}
+      </div>
       <label className="post-composer-input">
         <textarea
           aria-label="게시글 작성"
@@ -171,7 +209,7 @@ export function PostComposer({
       {message ? <p className="form-error">{message}</p> : null}
       <button
         className="primary-button"
-        disabled={isSubmitting}
+        disabled={isSubmitting || isRolling}
         type="submit"
       >
         {isSubmitting ? "전송 중..." : "전송"}
@@ -265,6 +303,63 @@ function PostIdentitySelect({
       ) : null}
     </div>
   );
+}
+
+type ComposerDiceButtonsProps = {
+  disabled: boolean;
+  onRoll: (diceCount: number, sides: number) => Promise<void>;
+};
+
+const diceOptions = [
+  { diceCount: 1, label: "1D6", sides: 6 },
+  { diceCount: 2, label: "2D6", sides: 6 },
+  { diceCount: 1, label: "1D10", sides: 10 },
+] as const;
+
+function ComposerDiceButtons({ disabled, onRoll }: ComposerDiceButtonsProps) {
+  return (
+    <div className="composer-dice-buttons" aria-label="주사위 굴림">
+      <Dices
+        aria-hidden="true"
+        className="composer-dice-icon"
+        size={19}
+        strokeWidth={2.2}
+      />
+      {diceOptions.map((option) => (
+        <button
+          className="secondary-button composer-dice-button"
+          disabled={disabled}
+          key={option.label}
+          type="button"
+          onClick={() => void onRoll(option.diceCount, option.sides)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function rollDie(sides: number) {
+  const values = new Uint32Array(1);
+  const limit = Math.floor(0x1_0000_0000 / sides) * sides;
+  let value = 0;
+
+  do {
+    crypto.getRandomValues(values);
+    value = values[0];
+  } while (value >= limit);
+
+  return (value % sides) + 1;
+}
+
+function formatDicePost(notation: string, dice: number[]) {
+  const values = dice.join("+");
+  const total = dice.reduce((sum, value) => sum + value, 0);
+
+  return dice.length === 1
+    ? `::${notation}=${values}`
+    : `::${notation}=${values}=${total}`;
 }
 
 type PostComposerDraft = {

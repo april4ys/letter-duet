@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   onSnapshot,
   serverTimestamp,
   updateDoc,
@@ -40,6 +41,27 @@ export function subscribeRoomStory(
     },
     onError,
   );
+}
+
+export async function fetchRoomStory(roomId: string): Promise<RoomStory> {
+  if (!db) {
+    throw new Error("Firestore가 초기화되지 않았습니다.");
+  }
+
+  const snapshot = await getDoc(doc(db, "rooms", roomId, "story", "main"));
+  const data = snapshot.data();
+  const storyFragments = Array.isArray(data?.storyFragments)
+    ? data.storyFragments.filter(
+        (fragment): fragment is string => typeof fragment === "string",
+      )
+    : [];
+
+  return {
+    storyFragments,
+    fragmentEffectCount: normalizeFragmentEffectCount(
+      data?.fragmentEffectCount,
+    ),
+  };
 }
 
 export async function updateRoomFragmentEffectCount(

@@ -1,6 +1,13 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
+import { X } from "lucide-react";
+import { createPortal } from "react-dom";
 import { getFirestoreErrorMessage } from "../lib/firestoreErrors";
-import { PostMarkdown } from "./PostMarkdown";
 import { createSystemRoomPost } from "./posts";
 import { subscribeRoomStory, updateRoomStory } from "./story";
 
@@ -18,15 +25,19 @@ export function StoryPanel({
   roomId,
 }: StoryPanelProps) {
   const [fragments, setFragments] = useState<string[]>([]);
-  const [draftFragments, setDraftFragments] = useState<string[]>([]);
   const [status, setStatus] = useState<StoryStatus>("loading");
-  const [isEditing, setIsEditing] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
   const [message, setMessage] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setStatus("loading");
     setMessage("");
+    closeEditor();
 
     try {
       return subscribeRoomStory(
@@ -57,34 +68,37 @@ export function StoryPanel({
   }, [roomId]);
 
   useEffect(() => {
-    if (!isEditing) {
-      setDraftFragments(fragments);
+    if (isAdding || editingIndex !== null) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
     }
-  }, [fragments, isEditing]);
+  }, [editingIndex, isAdding]);
 
-  function updateDraftFragment(index: number, value: string) {
-    setDraftFragments((currentFragments) =>
-      currentFragments.map((fragment, fragmentIndex) =>
-        fragmentIndex === index ? value : fragment,
-      ),
-    );
+  function closeEditor() {
+    setEditingIndex(null);
+    setIsAdding(false);
+    setDraft("");
   }
 
-  function addDraftFragment() {
-    setDraftFragments((currentFragments) => [...currentFragments, ""]);
+  function beginAdding() {
+    setMessage("");
+    setEditingIndex(null);
+    setDraft("");
+    setIsAdding(true);
   }
 
-  function removeDraftFragment(index: number) {
-    setDraftFragments((currentFragments) =>
-      currentFragments.filter((_, fragmentIndex) => fragmentIndex !== index),
-    );
+  function beginEditing(index: number) {
+    if (!canEdit || isSaving) {
+      return;
+    }
+
+    setMessage("");
+    setIsAdding(false);
+    setEditingIndex(index);
+    setDraft(fragments[index] ?? "");
   }
 
-  async function handleSave() {
-    const nextFragments = draftFragments
-      .map((fragment) => fragment.trim())
-      .filter(Boolean);
-
+  async function saveFragments(nextFragments: string[]) {
     setIsSaving(true);
     setMessage("");
 
@@ -95,7 +109,7 @@ export function StoryPanel({
         formatStorySystemMessage(nextFragments),
         currentUserUid,
       );
-      setIsEditing(false);
+      closeEditor();
     } catch (error) {
       setMessage(
         getFirestoreErrorMessage(error, "Story Fragment를 저장하지 못했습니다."),
@@ -105,16 +119,47 @@ export function StoryPanel({
     }
   }
 
-  function beginEditing() {
-    setDraftFragments(fragments);
-    setMessage("");
-    setIsEditing(true);
+  function submitDraft() {
+    const nextValue = draft.trim();
+
+    if (!nextValue || isSaving) {
+      return;
+    }
+
+    if (isAdding) {
+      void saveFragments([...fragments, nextValue]);
+      return;
+    }
+
+    if (editingIndex !== null) {
+      void saveFragments(
+        fragments.map((fragment, index) =>
+          index === editingIndex ? nextValue : fragment,
+        ),
+      );
+    }
   }
 
-  function cancelEditing() {
-    setDraftFragments(fragments);
-    setMessage("");
-    setIsEditing(false);
+  function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitDraft();
+    }
+
+    if (event.key === "Escape") {
+      closeEditor();
+    }
+  }
+
+  function removeFragment(index: number) {
+    if (isSaving) {
+      return;
+    }
+
+    setDeletingIndex(null);
+    void saveFragments(
+      fragments.filter((_, fragmentIndex) => fragmentIndex !== index),
+    );
   }
 
   if (status === "loading") {
@@ -129,96 +174,147 @@ export function StoryPanel({
     <section className="story-panel" aria-labelledby="story-title">
       <header>
         <strong id="story-title">Story Fragment</strong>
-        {canEdit && !isEditing ? (
-          <button
-            className="post-action-button"
-            type="button"
-            onClick={beginEditing}
-          >
-            수정
-          </button>
-        ) : null}
       </header>
-      {isEditing ? (
-        <div className="story-edit-form">
-          <div className="story-edit-list">
-            {draftFragments.map((fragment, index) => (
-              <div className="story-edit-row" key={index}>
-                <label>
-                  <span>Fragment {index + 1}</span>
-                  <textarea
-                    disabled={isSaving}
-                    onChange={(event) =>
-                      updateDraftFragment(index, event.target.value)
-                    }
-                    rows={4}
-                    value={fragment}
-                  />
-                </label>
+      <div className="story-fragment-cloud">
+        {fragments.map((fragment, index) =>
+          editingIndex === index ? (
+            <FragmentInput
+              disabled={isSaving}
+              inputRef={inputRef}
+              key={`editing-${index}`}
+              onBlur={closeEditor}
+              onChange={setDraft}
+              onKeyDown={handleInputKeyDown}
+              value={draft}
+            />
+          ) : (
+            <div className="story-fragment-chip" key={`${index}-${fragment}`}>
+              <button
+                className="story-fragment-label"
+                disabled={!canEdit || isSaving}
+                type="button"
+                onClick={() => beginEditing(index)}
+              >
+                {fragment}
+              </button>
+              {canEdit ? (
                 <button
-                  className="text-button danger-text-button"
+                  aria-label={`${fragment} 삭제`}
+                  className="story-fragment-remove"
                   disabled={isSaving}
+                  title="삭제"
                   type="button"
-                  onClick={() => removeDraftFragment(index)}
+                  onClick={() => setDeletingIndex(index)}
                 >
-                  삭제
+                  <X aria-hidden="true" size={13} strokeWidth={2.5} />
                 </button>
-              </div>
-            ))}
-          </div>
+              ) : null}
+            </div>
+          ),
+        )}
+        {isAdding ? (
+          <FragmentInput
+            disabled={isSaving}
+            inputRef={inputRef}
+            onBlur={closeEditor}
+            onChange={setDraft}
+            onKeyDown={handleInputKeyDown}
+            value={draft}
+          />
+        ) : canEdit ? (
           <button
-            className="secondary-button"
+            className="story-fragment-add"
             disabled={isSaving}
             type="button"
-            onClick={addDraftFragment}
+            onClick={beginAdding}
           >
-            Fragment 추가
+            추가하기
           </button>
-          {message ? <p className="form-error">{message}</p> : null}
-          <div className="story-edit-actions">
-            <button
-              className="primary-button"
-              disabled={isSaving}
-              type="button"
-              onClick={handleSave}
+        ) : null}
+        {!canEdit && fragments.length === 0 ? (
+          <p className="story-empty">아직 Story Fragment가 없습니다.</p>
+        ) : null}
+      </div>
+      {message ? <p className="form-error">{message}</p> : null}
+      {deletingIndex !== null
+        ? createPortal(
+            <div
+              aria-labelledby="story-fragment-delete-title"
+              aria-modal="true"
+              className="post-delete-dialog room-status-dialog"
+              role="dialog"
             >
-              {isSaving ? "저장 중..." : "저장"}
-            </button>
-            <button
-              className="secondary-button"
-              disabled={isSaving}
-              type="button"
-              onClick={cancelEditing}
-            >
-              취소
-            </button>
-          </div>
-        </div>
-      ) : fragments.length > 0 ? (
-        <ol className="story-fragment-list">
-          {fragments.map((fragment, index) => (
-            <li key={`${index}-${fragment}`}>
-              <span>Fragment {index + 1}</span>
-              <PostMarkdown content={fragment} />
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="story-empty">아직 Story Fragment가 없습니다.</p>
-      )}
+              <div className="post-delete-dialog-panel">
+                <strong id="story-fragment-delete-title">
+                  Story Fragment를 삭제할까요?
+                </strong>
+                <p>{fragments[deletingIndex]}</p>
+                <div>
+                  <button
+                    className="secondary-button"
+                    disabled={isSaving}
+                    type="button"
+                    onClick={() => setDeletingIndex(null)}
+                  >
+                    취소
+                  </button>
+                  <button
+                    className="primary-button danger-button"
+                    disabled={isSaving}
+                    type="button"
+                    onClick={() => removeFragment(deletingIndex)}
+                  >
+                    삭제
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
+  );
+}
+
+type FragmentInputProps = {
+  disabled: boolean;
+  inputRef: RefObject<HTMLInputElement | null>;
+  onBlur: () => void;
+  onChange: (value: string) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  value: string;
+};
+
+function FragmentInput({
+  disabled,
+  inputRef,
+  onBlur,
+  onChange,
+  onKeyDown,
+  value,
+}: FragmentInputProps) {
+  return (
+    <input
+      aria-label="Story Fragment"
+      className="story-fragment-input"
+      disabled={disabled}
+      maxLength={80}
+      ref={inputRef}
+      size={16}
+      type="text"
+      value={value}
+      onBlur={onBlur}
+      onChange={(event) => onChange(event.target.value)}
+      onKeyDown={onKeyDown}
+    />
   );
 }
 
 function formatStorySystemMessage(storyFragments: string[]) {
   const content =
     storyFragments.length > 0
-      ? storyFragments
-          .map((fragment, index) => `Fragment ${index + 1}\n${fragment}`)
-          .join("\n\n")
+      ? storyFragments.join(" · ")
       : "Story Fragment가 비어 있습니다.";
 
-  return `Story Fragment 현황
-
-${content}`;
+  return `Story Fragment 현황\n\n${content}`;
 }

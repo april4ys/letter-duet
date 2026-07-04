@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { type User } from "firebase/auth";
 import { getFirestoreErrorMessage } from "../lib/firestoreErrors";
-import { PostMarkdown } from "./PostMarkdown";
+import { subscribeRoomCharacters } from "./characters";
+import { isDicePostContent, PostMarkdown } from "./PostMarkdown";
 import {
   deleteRoomPost,
   subscribeRecentRoomPosts,
@@ -18,6 +19,16 @@ type PostsListProps = {
 
 type PostsStatus = "loading" | "ready" | "error";
 
+type CharacterNames = {
+  player1: string;
+  player2: string;
+};
+
+const defaultCharacterNames: CharacterNames = {
+  player1: "Player 1",
+  player2: "Player 2",
+};
+
 export function PostsList({
   currentUser,
   isGM,
@@ -27,7 +38,27 @@ export function PostsList({
   const [posts, setPosts] = useState<RoomPost[]>([]);
   const [status, setStatus] = useState<PostsStatus>("loading");
   const [errorMessage, setErrorMessage] = useState("");
+  const [characterNames, setCharacterNames] = useState<CharacterNames>(
+    defaultCharacterNames,
+  );
   const currentAuthorRole = isGM ? "player1" : "player2";
+
+  useEffect(() => {
+    return subscribeRoomCharacters(
+      (characters) => {
+        setCharacterNames({
+          player1:
+            characters.find((character) => character.id === "player1")?.name ||
+            defaultCharacterNames.player1,
+          player2:
+            characters.find((character) => character.id === "player2")?.name ||
+            defaultCharacterNames.player2,
+        });
+      },
+      () => undefined,
+      roomId,
+    );
+  }, [roomId]);
 
   useEffect(() => {
     setStatus("loading");
@@ -73,13 +104,16 @@ export function PostsList({
     <ol className="posts-list" aria-label="최근 게시글">
       {visiblePosts.map((post) => (
         <PostListItem
-          canEdit={!isReadOnly && isGM}
+          canEdit={
+            !isReadOnly && isGM && !isDicePostContent(post.content)
+          }
           canDelete={
             !isReadOnly &&
             (isGM ||
               (post.type === "post" && post.authorUid === currentUser.uid))
           }
           currentAuthorRole={currentAuthorRole}
+          characterNames={characterNames}
           key={post.id}
           post={post}
           roomId={roomId}
@@ -92,6 +126,7 @@ export function PostsList({
 type PostListItemProps = {
   canDelete: boolean;
   canEdit: boolean;
+  characterNames: CharacterNames;
   currentAuthorRole: "player1" | "player2";
   post: RoomPost;
   roomId: string;
@@ -100,6 +135,7 @@ type PostListItemProps = {
 function PostListItem({
   canDelete,
   canEdit,
+  characterNames,
   currentAuthorRole,
   post,
   roomId,
@@ -190,10 +226,14 @@ function PostListItem({
         )}
         <footer>
           <div className="post-meta">
-            <span>
+            <span
+              className={
+                post.type === "system" ? undefined : "post-author-name"
+              }
+            >
               {post.type === "system"
                 ? "system"
-                : getAuthorLabel(post)}
+                : getAuthorLabel(post, characterNames)}
             </span>
             <time dateTime={post.createdAt?.toISOString()}>
               {formatPostDate(post.createdAt)}
@@ -274,8 +314,10 @@ function getPostClassName(
     : "post-item post-item-other";
 }
 
-function getAuthorLabel(post: RoomPost) {
-  return post.authorRole === "player1" ? "GM" : "player2";
+function getAuthorLabel(post: RoomPost, characterNames: CharacterNames) {
+  return post.authorRole === "player1"
+    ? characterNames.player1
+    : characterNames.player2;
 }
 
 function formatPostDate(date: Date | null) {

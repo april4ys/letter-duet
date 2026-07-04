@@ -18,6 +18,7 @@ import {
   type RoomPostsPageCursor,
 } from "../rooms/posts";
 import { fetchRoomAccess, setRoomDeleted } from "../rooms/rooms";
+import { fetchRoomStory } from "../rooms/story";
 
 type RoomLogPageProps = {
   authSetupError: string;
@@ -222,13 +223,20 @@ export function RoomLogPage({
     setErrorMessage("");
 
     try {
-      const [allPosts, characters, room] = await Promise.all([
+      const [allPosts, characters, room, story] = await Promise.all([
         fetchAllRoomPosts(roomId),
         fetchRoomCharacters(roomId),
         fetchRoomAccess(roomId),
+        fetchRoomStory(roomId),
       ]);
       downloadTextFile(
-        formatRoomLogAsText(allPosts, characters, roomId, room.title),
+        formatRoomLogAsText(
+          allPosts,
+          characters,
+          story.storyFragments,
+          roomId,
+          room.title,
+        ),
         `letter-duet-${roomId}-log.txt`,
       );
     } catch (error) {
@@ -304,7 +312,13 @@ export function RoomLogPage({
                   <PostMarkdown content={post.content} />
                   <footer>
                     <div className="post-meta">
-                      <span>{getLogPostAuthor(post, characterNames)}</span>
+                      <span
+                        className={
+                          post.type === "system" ? undefined : "post-author-name"
+                        }
+                      >
+                        {getLogPostAuthor(post, characterNames)}
+                      </span>
                       <time dateTime={post.createdAt?.toISOString()}>
                         {formatPostDate(post.createdAt)}
                       </time>
@@ -389,12 +403,23 @@ export function RoomLogPage({
 function formatRoomLogAsText(
   posts: RoomPost[],
   characters: RoomCharacter[],
+  storyFragments: string[],
   roomId: string,
   roomTitle: string,
 ) {
+  const characterNames = {
+    player1:
+      characters.find((character) => character.id === "player1")?.name ||
+      "Player 1",
+    player2:
+      characters.find((character) => character.id === "player2")?.name ||
+      "Player 2",
+  };
   const formattedPosts =
     posts.length > 0
-      ? posts.map(formatPostAsText).join("\n\n---\n\n")
+      ? posts
+          .map((post) => formatPostAsText(post, characterNames))
+          .join("\n\n---\n\n")
       : "표시할 로그가 없습니다.";
 
   return `Letter Duet: ${roomTitle}(${roomId}) log
@@ -409,6 +434,10 @@ ${formattedPosts}
 ---
 
 ${formatCurrentCharacters(characters)}
+
+---
+
+${formatStoryFragments(storyFragments)}
 `;
 }
 
@@ -478,22 +507,41 @@ function formatCurrentCharacter(character: RoomCharacter) {
 ${fragments}`;
 }
 
+function formatStoryFragments(storyFragments: string[]) {
+  const fragments =
+    storyFragments.length > 0
+      ? storyFragments
+          .map((fragment, index) => `${index + 1}. ${fragment}`)
+          .join("\n")
+      : "(없음)";
+
+  return `Story Fragment 현황\n\n${fragments}`;
+}
+
 function formatCharacterRole(role: CharacterRole) {
   return role === "binder" ? "바인더" : "시프터";
 }
 
-function formatPostAsText(post: RoomPost) {
-  return `[${formatPostDate(post.createdAt)}] ${formatPostRole(post)}
+function formatPostAsText(
+  post: RoomPost,
+  characterNames: { player1: string; player2: string },
+) {
+  return `[${formatPostDate(post.createdAt)}] ${formatPostRole(post, characterNames)}
 
 ${post.content}`;
 }
 
-function formatPostRole(post: RoomPost) {
+function formatPostRole(
+  post: RoomPost,
+  characterNames: { player1: string; player2: string },
+) {
   if (post.type === "system") {
     return "system";
   }
 
-  return post.authorRole === "player1" ? "GM" : "player2";
+  return post.authorRole === "player1"
+    ? characterNames.player1
+    : characterNames.player2;
 }
 
 function downloadTextFile(content: string, filename: string) {

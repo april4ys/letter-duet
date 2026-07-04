@@ -6,6 +6,7 @@ type AppLayoutProps = {
   authSetupError: string;
   children: ReactNode;
   navigation?: ReactNode;
+  onBrandTitleClick?: () => void;
   showAuthTitle?: boolean;
   showNavigationTitle?: boolean;
   title: string;
@@ -17,6 +18,7 @@ export function AppLayout({
   authSetupError,
   children,
   navigation,
+  onBrandTitleClick,
   showAuthTitle = true,
   showNavigationTitle = true,
   title,
@@ -68,7 +70,19 @@ export function AppLayout({
         }
       >
         {!isAppLayout ? (
-          <h1 className="brand-title">Letter Duet</h1>
+          <h1 className="brand-title">
+            {onBrandTitleClick ? (
+              <button
+                className="brand-title-button"
+                type="button"
+                onClick={onBrandTitleClick}
+              >
+                Letter Duet
+              </button>
+            ) : (
+              "Letter Duet"
+            )}
+          </h1>
         ) : null}
         {hasFirebaseError ? (
           <div className="status" role="alert">
