@@ -39,30 +39,17 @@ export function PostComposer({
 }: PostComposerProps) {
   const draftKey = `letter-duet:${currentUser.uid}:${roomId}:post-composer`;
   const defaultAuthorRole = getDefaultAuthorRole(canCreateSystemPost);
-  const [content, setContent] = useState(
-    () =>
-      readLocalDraft(
-        draftKey,
-        createEmptyPostComposerDraft(defaultAuthorRole),
-      ).content,
+  const [initialDraft] = useState(() =>
+    readPostComposerDraft(
+      draftKey,
+      defaultAuthorRole,
+      canCreateSystemPost,
+    ),
   );
-  const [postType, setPostType] = useState<RoomPostType>(
-    () =>
-      readLocalDraft(
-        draftKey,
-        createEmptyPostComposerDraft(defaultAuthorRole),
-      ).type,
-  );
-  const [authorRole, setAuthorRole] = useState<RoomPostAuthorRole>(
-    () => {
-      const draft = readLocalDraft<Partial<PostComposerDraft>>(
-        draftKey,
-        createEmptyPostComposerDraft(defaultAuthorRole),
-      );
-
-      return normalizeDraftAuthorRole(draft.authorRole, defaultAuthorRole);
-    },
-  );
+  const [content, setContent] = useState(initialDraft.content);
+  const [postType, setPostType] = useState<RoomPostType>(initialDraft.type);
+  const [authorRole, setAuthorRole] =
+    useState<RoomPostAuthorRole>(initialDraft.authorRole);
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRolling, setIsRolling] = useState(false);
@@ -108,7 +95,7 @@ export function PostComposer({
       setPostType("post");
       setAuthorRole("player2");
     }
-  }, [authorRole, canCreateSystemPost, content, postType]);
+  }, [authorRole, canCreateSystemPost, postType]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -374,6 +361,37 @@ function createEmptyPostComposerDraft(
   return { authorRole, content: "", type: "post" };
 }
 
+function readPostComposerDraft(
+  draftKey: string,
+  defaultAuthorRole: "player1" | "player2",
+  canCreateSystemPost: boolean,
+): PostComposerDraft {
+  const fallback = createEmptyPostComposerDraft(defaultAuthorRole);
+  const storedDraft = readLocalDraft<Partial<PostComposerDraft>>(
+    draftKey,
+    fallback,
+  );
+  const content =
+    typeof storedDraft.content === "string" ? storedDraft.content : "";
+
+  if (!content.trim()) {
+    removeLocalDraft(draftKey);
+    return fallback;
+  }
+
+  if (!canCreateSystemPost) {
+    return { authorRole: "player2", content, type: "post" };
+  }
+
+  const type = storedDraft.type === "system" ? "system" : "post";
+  const authorRole =
+    type === "system"
+      ? "system"
+      : normalizeDraftAuthorRole(storedDraft.authorRole, defaultAuthorRole);
+
+  return { authorRole, content, type };
+}
+
 function getDefaultAuthorRole(canCreateSystemPost: boolean) {
   return canCreateSystemPost ? ("player1" as const) : ("player2" as const);
 }
@@ -381,8 +399,6 @@ function getDefaultAuthorRole(canCreateSystemPost: boolean) {
 function normalizeDraftAuthorRole(
   value: unknown,
   fallback: "player1" | "player2",
-): RoomPostAuthorRole {
-  return value === "player1" || value === "player2" || value === "system"
-    ? value
-    : fallback;
+) {
+  return value === "player1" || value === "player2" ? value : fallback;
 }

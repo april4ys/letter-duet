@@ -27,28 +27,37 @@ export function RoomPage({
   const [isCharacterPanelOpen, setIsCharacterPanelOpen] = useState(false);
   const [isNoticePanelOpen, setIsNoticePanelOpen] = useState(false);
   const [gmUid, setGmUid] = useState("");
+  const [isRoomAccessReady, setIsRoomAccessReady] = useState(false);
   const [isArchived, setIsArchived] = useState(false);
   const [roomTitle, setRoomTitle] = useState("");
 
   useEffect(() => {
     if (!currentUser || !roomId) {
       setGmUid("");
+      setIsRoomAccessReady(false);
       setIsArchived(false);
       setRoomTitle("");
       return undefined;
     }
+
+    setIsRoomAccessReady(false);
 
     try {
       return subscribeRoomAccess(
         roomId,
         (room) => {
           setGmUid(room.gmUid);
+          setIsRoomAccessReady(true);
           setIsArchived(room.isArchived);
           setRoomTitle(room.title);
         },
-        () => navigate("/rooms", { replace: true }),
+        () => {
+          setIsRoomAccessReady(false);
+          navigate("/rooms", { replace: true });
+        },
       );
     } catch {
+      setIsRoomAccessReady(false);
       navigate("/rooms", { replace: true });
       return undefined;
     }
@@ -166,13 +175,14 @@ export function RoomPage({
       />
       {isArchived ? (
         <div className="room-read-only-notice">종료된 세션은 읽기 전용입니다.</div>
-      ) : (
+      ) : isRoomAccessReady ? (
         <PostComposer
           canCreateSystemPost={isGM}
           currentUser={currentUser}
+          key={`${roomId}:${isGM ? "gm" : "player"}`}
           roomId={roomId}
         />
-      )}
+      ) : null}
     </AppLayout>
   );
 }
