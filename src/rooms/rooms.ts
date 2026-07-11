@@ -43,7 +43,7 @@ export async function createRoom(
 
   await setDoc(
     doc(db, "rooms", roomRef.id, "characters", "player1"),
-    createInitialCharacter("Player 1", "binder"),
+    createInitialCharacter("Player 1", "shifter"),
   );
   await setDoc(doc(db, "rooms", roomRef.id, "notice", "main"), {
     content: "",
@@ -55,7 +55,7 @@ export async function createRoom(
   });
   await setDoc(
     doc(db, "rooms", roomRef.id, "characters", "player2"),
-    createInitialCharacter("Player 2", "shifter"),
+    createInitialCharacter("Player 2", "binder"),
   );
 
   return roomRef.id;

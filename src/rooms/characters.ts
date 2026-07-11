@@ -134,7 +134,7 @@ function normalizeCharacterRole(value: unknown, characterId: string): CharacterR
     return value;
   }
 
-  return characterId === "player1" ? "binder" : "shifter";
+  return characterId === "player1" ? "shifter" : "binder";
 }
 
 function normalizeFragments(value: unknown): CharacterFragment[] {

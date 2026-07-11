@@ -73,6 +73,22 @@ service cloud.firestore {
         );
     }
 
+    function isValidStoryFragmentsUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(["storyFragments"])
+        && request.resource.data.storyFragments is list;
+    }
+
+    function isValidFragmentEffectUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(["fragmentEffectCount", "updatedAt"])
+        && request.resource.data.fragmentEffectCount is int
+        && request.resource.data.fragmentEffectCount >= 0
+        && request.resource.data.fragmentEffectCount <= 18
+        && request.resource.data.updatedAt == request.time
+        && isValidFragmentEffectStep();
+    }
+
     function isValidFragmentEffectStep() {
       return (
           !resource.data.keys().hasAny(["fragmentEffectCount"])
@@ -192,19 +208,14 @@ service cloud.firestore {
 
         allow update: if isRoomActive(roomId)
           && docId == "main"
-          && isValidStory()
           && (
             (
               isGM(roomId)
-              && request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(["storyFragments"])
+              && isValidStoryFragmentsUpdate()
             )
             || (
               isRoomMember(roomId)
-              && request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(["fragmentEffectCount", "updatedAt"])
-              && request.resource.data.updatedAt == request.time
-              && isValidFragmentEffectStep()
+              && isValidFragmentEffectUpdate()
             )
           );
 

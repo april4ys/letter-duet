@@ -71,10 +71,10 @@ async function mapRoomCard(
         : null,
     player1Name:
       typeof player1Data?.name === "string" ? player1Data.name : "Player 1",
-    player1Role: normalizeCharacterRole(player1Data?.role, "binder"),
+    player1Role: normalizeCharacterRole(player1Data?.role, "shifter"),
     player2Name:
       typeof player2Data?.name === "string" ? player2Data.name : "Player 2",
-    player2Role: normalizeCharacterRole(player2Data?.role, "shifter"),
+    player2Role: normalizeCharacterRole(player2Data?.role, "binder"),
   };
 }
 
